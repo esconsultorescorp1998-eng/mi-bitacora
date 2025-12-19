@@ -1,25 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Car, 
-  MapPin, 
-  Settings, 
-  PlusCircle, 
-  FileSpreadsheet, 
-  History, 
-  Save, 
-  Trash2,
-  TrendingUp,
-  DollarSign,
-  ClipboardList,
-  AlertTriangle
+  Car, MapPin, Settings, PlayCircle, StopCircle, 
+  FileSpreadsheet, History, Trash2, 
+  Clock, Calendar, CheckCircle, ShieldCheck,
+  AlertTriangle, XCircle, AlertOctagon
 } from 'lucide-react';
 
-// He renombrado la función principal a 'App' para que coincida con tu archivo src/App.jsx
 export default function App() {
-  // Estado para la navegación entre pestañas
-  const [activeTab, setActiveTab] = useState('registro');
-
-  // Estado para la configuración (Parámetros)
+  // --- ESTADOS ---
+  const [activeTab, setActiveTab] = useState('dashboard');
+  
+  // Configuración Persistente
   const [config, setConfig] = useState({
     conductor: '',
     vehiculo: '',
@@ -27,492 +18,635 @@ export default function App() {
     precioPorLitro: 25.00
   });
 
-  // Estado para el formulario de nuevo viaje
-  const [nuevoViaje, setNuevoViaje] = useState({
-    inicio: '',
-    fin: '',
-    kmInicial: '',
-    kmFinal: '',
-    destinos: '',
-    diligencias: '' 
+  // Estado de la Jornada
+  const [jornada, setJornada] = useState({
+    estado: 'cerrado', // 'cerrado', 'abierto'
+    fechaInicio: null,
+    kmInicialDia: 0,
+    fechaCierre: null
   });
 
-  // Estado para la lista de viajes (Base de datos local)
+  // Estado del Viaje Actual
+  const [viajeActual, setViajeActual] = useState(null);
+  // Historial de Viajes
   const [viajes, setViajes] = useState([]);
 
-  // Cargar datos guardados al iniciar y verificar si es primera vez
+  // Formularios temporales
+  const [formInicioDia, setFormInicioDia] = useState({ km: '' });
+  const [formInicioViaje, setFormInicioViaje] = useState({ destino: '', diligencias: '', kmInicial: '' });
+  const [formFinViaje, setFormFinViaje] = useState({ kmFinal: '', comentarios: '' });
+  
+  // Filtros
+  const [filtroFecha, setFiltroFecha] = useState(new Date().toISOString().split('T')[0]);
+
+  // --- EFECTOS ---
   useEffect(() => {
     try {
-      const configGuardada = localStorage.getItem('bv_config');
-      const viajesGuardados = localStorage.getItem('bv_viajes');
-      
-      let configLoaded = null;
+      const configLocal = JSON.parse(localStorage.getItem('bv_config'));
+      const jornadaLocal = JSON.parse(localStorage.getItem('bv_jornada'));
+      const viajeActualLocal = JSON.parse(localStorage.getItem('bv_viaje_actual'));
+      const viajesLocal = JSON.parse(localStorage.getItem('bv_viajes'));
 
-      if (configGuardada) {
-        configLoaded = JSON.parse(configGuardada);
-        setConfig(configLoaded);
-      }
+      if (configLocal) setConfig(configLocal);
+      if (jornadaLocal) setJornada(jornadaLocal);
       
-      if (viajesGuardados) {
-        setViajes(JSON.parse(viajesGuardados));
+      if (viajeActualLocal && viajeActualLocal.id && viajeActualLocal.estado === 'en_curso') {
+          setViajeActual(viajeActualLocal);
+      } else {
+          setViajeActual(null); 
       }
 
-      // Si no hay conductor o vehículo configurado, forzar la vista de Configuración
-      if (!configLoaded || !configLoaded.conductor || !configLoaded.vehiculo) {
-        setActiveTab('config');
-      }
-    } catch (error) {
-      console.error("Error cargando datos locales:", error);
+      if (viajesLocal) setViajes(viajesLocal);
+      if (!configLocal?.conductor) setActiveTab('config');
+
+    } catch (e) { 
+        console.error("Error cargando datos", e);
+        setViajeActual(null);
     }
   }, []);
 
-  // Guardar datos cuando cambian (Persistencia)
   useEffect(() => {
-    try {
-      localStorage.setItem('bv_config', JSON.stringify(config));
-      localStorage.setItem('bv_viajes', JSON.stringify(viajes));
-    } catch (error) {
-      console.error("Error guardando datos:", error);
-    }
-  }, [config, viajes]);
+    localStorage.setItem('bv_config', JSON.stringify(config));
+    localStorage.setItem('bv_jornada', JSON.stringify(jornada));
+    localStorage.setItem('bv_viaje_actual', JSON.stringify(viajeActual));
+    localStorage.setItem('bv_viajes', JSON.stringify(viajes));
+  }, [config, jornada, viajeActual, viajes]);
 
-  // Manejar cambios en inputs de configuración
-  const handleConfigChange = (e) => {
-    const { name, value } = e.target;
-    setConfig(prev => ({
-      ...prev,
-      [name]: name.includes('precio') || name.includes('km') ? parseFloat(value) || 0 : value
-    }));
+  // --- VALIDACIÓN DE JORNADA PASADA ---
+  const esJornadaPasadaAbierta = () => {
+      if (jornada.estado !== 'abierto') return false;
+      if (!jornada.fechaInicio) return false;
+      
+      const fechaJornada = new Date(jornada.fechaInicio).toDateString();
+      const fechaHoy = new Date().toDateString();
+      
+      return fechaJornada !== fechaHoy;
   };
 
-  // Manejar cambios en formulario de viaje
-  const handleViajeChange = (e) => {
-    const { name, value } = e.target;
-    setNuevoViaje(prev => ({
-      ...prev,
-      [name]: value
-    }));
-  };
+  // --- LÓGICA DE NEGOCIO ---
 
-  // Calcular y Guardar Viaje
-  const registrarViaje = (e) => {
+  const iniciarDia = (e) => {
     e.preventDefault();
+    const km = parseFloat(formInicioDia.km);
+    if (!km || km < 0) return alert("Ingrese un kilometraje válido");
 
-    // Validaciones básicas
-    const kmI = parseFloat(nuevoViaje.kmInicial);
-    const kmF = parseFloat(nuevoViaje.kmFinal);
+    setJornada({
+      estado: 'abierto',
+      fechaInicio: new Date().toISOString(),
+      kmInicialDia: km,
+      fechaCierre: null
+    });
+    setFormInicioDia({ km: '' });
+    setFormInicioViaje(prev => ({ ...prev, kmInicial: km }));
+  };
 
-    if (kmF <= kmI) {
-      alert("Error: El kilometraje final debe ser mayor al inicial.");
-      return;
+  const iniciarRecorrido = (e) => {
+    e.preventDefault();
+    const kmI = parseFloat(formInicioViaje.kmInicial);
+    
+    // Validar gaps
+    const ultimoViaje = viajes.length > 0 ? viajes[0] : null;
+    let kmSugerido = ultimoViaje ? ultimoViaje.kmFinal : jornada.kmInicialDia;
+    
+    if (kmI < kmSugerido) {
+      if(!confirm(`⚠️ ¿KILOMETRAJE MENOR?\n\nIngresado: ${kmI}\nAnterior: ${kmSugerido}\n\n¿Es correcto?`)) return;
     }
-    if (!config.conductor || !config.vehiculo) {
-      alert("Por favor configura el conductor y vehículo primero en la pestaña de Ajustes.");
-      setActiveTab('config');
-      return;
-    }
 
-    // Cálculos matemáticos
-    const kmRecorridos = kmF - kmI;
-    const litrosUsados = kmRecorridos / (config.kmPorLitro || 1); // Evitar división por 0
-    const costoTotal = litrosUsados * config.precioPorLitro;
-
-    const viajeProcesado = {
+    const nuevoViaje = {
       id: Date.now(),
-      fechaRegistro: new Date().toLocaleDateString(),
-      conductor: config.conductor,
-      vehiculo: config.vehiculo,
-      ...nuevoViaje,
-      kmRecorridos: kmRecorridos.toFixed(2),
-      litrosUsados: litrosUsados.toFixed(2),
-      precioPorLitro: config.precioPorLitro,
-      costoTotal: costoTotal.toFixed(2)
+      diaId: new Date(jornada.fechaInicio).toDateString(), 
+      inicio: new Date().toISOString(),
+      fin: null,
+      kmInicial: kmI,
+      kmFinal: null,
+      destinos: formInicioViaje.destino,
+      diligencias: formInicioViaje.diligencias,
+      estado: 'en_curso'
     };
 
-    setViajes([viajeProcesado, ...viajes]); // Añadir al principio de la lista
-    
-    // Limpiar formulario y preparar para el siguiente
-    setNuevoViaje({
-      inicio: '',
-      fin: '',
-      kmInicial: kmF, // Auto-sugerir el final anterior
-      kmFinal: '',
-      destinos: '',
-      diligencias: ''
-    });
-    
-    alert("Viaje registrado correctamente.");
-    setActiveTab('historial');
+    setViajeActual(nuevoViaje);
+    setFormInicioViaje({ destino: '', diligencias: '', kmInicial: '' }); 
   };
 
-  // Borrar un viaje individual
-  const borrarViaje = (id) => {
-    if(window.confirm("¿Estás seguro de borrar este registro?")) {
-      setViajes(viajes.filter(v => v.id !== id));
-    }
+  const finalizarRecorrido = (e) => {
+    e.preventDefault();
+    if (!viajeActual) return;
+
+    const kmF = parseFloat(formFinViaje.kmFinal);
+    const kmI = viajeActual.kmInicial;
+    const fechaFin = new Date();
+
+    if (kmF <= kmI) return alert("El kilometraje final debe ser mayor al inicial.");
+    
+    const kmRecorridos = kmF - kmI;
+    const litrosUsados = kmRecorridos / (config.kmPorLitro || 1);
+    const costoTotal = litrosUsados * config.precioPorLitro;
+
+    const viajeCerrado = {
+      ...viajeActual,
+      fin: fechaFin.toISOString(),
+      kmFinal: kmF,
+      kmRecorridos: kmRecorridos.toFixed(2),
+      litrosUsados: litrosUsados.toFixed(2),
+      costoTotal: costoTotal.toFixed(2),
+      comentarios: formFinViaje.comentarios || 'Sin novedades',
+      estado: 'completado'
+    };
+
+    setViajes([viajeCerrado, ...viajes]); 
+    setViajeActual(null);
+    setFormFinViaje({ kmFinal: '', comentarios: '' });
   };
 
-  // REINICIAR TODA LA APP (Factory Reset)
-  const reiniciarApp = () => {
-    if (window.confirm("⚠️ ¿PELIGRO: Estás seguro de que quieres borrar TODOS los datos?\n\nSe eliminará todo el historial y configuración.\n\nEsta acción NO se puede deshacer.")) {
-        if (window.confirm("Confirmación final: Presiona Aceptar para borrar todo.")) {
-            localStorage.removeItem('bv_config');
-            localStorage.removeItem('bv_viajes');
-            setConfig({
-                conductor: '',
-                vehiculo: '',
-                kmPorLitro: 10,
-                precioPorLitro: 25.00
-            });
-            setViajes([]);
-            setNuevoViaje({
-                inicio: '',
-                fin: '',
-                kmInicial: '',
-                kmFinal: '',
-                destinos: '',
-                diligencias: ''
-            });
-            alert("La aplicación se ha reiniciado de fábrica.");
-            setActiveTab('config');
+  const cancelarViajeActual = () => {
+      if(confirm("¿Se canceló la orden?\n\nAl confirmar, se borrará este registro de inicio y podrás ingresar uno nuevo.")) {
+          setViajeActual(null);
+      }
+  };
+
+  // 4. CIERRE DE JORNADA (SIMPLIFICADO Y ROBUSTO)
+  const cerrarDia = () => {
+    // 1. Verificar si hay viaje trabado
+    if (viajeActual && viajeActual.id) {
+        if(confirm(`⚠️ Tienes un viaje ABIERTO.\n\n¿Quieres CANCELARLO y cerrar el día?`)) {
+            setViajeActual(null);
+            // Continuamos al cierre...
+        } else {
+            return; // Canceló la acción
         }
     }
-  };
+    
+    // 2. Confirmación simple
+    if(!confirm("¿CONFIRMAR: Finalizar jornada?")) return;
 
-  // Función para exportar a Excel (CSV)
-  const exportarExcel = () => {
-    if (viajes.length === 0) {
-      alert("No hay datos para exportar.");
-      return;
-    }
+    // 3. Ejecución directa del cierre
+    const fechaCierre = new Date().toISOString();
+    const fechaParaReporte = jornada.fechaInicio || new Date().toISOString();
 
-    let csvContent = "data:text/csv;charset=utf-8,";
-    csvContent += "ID,Fecha Registro,Conductor,Vehiculo,Inicio Viaje,Fin Viaje,Destinos,Diligencias,Km Inicial,Km Final,Km Recorridos,Litros Consumidos,Costo Total (C$)\n";
-
-    viajes.forEach(row => {
-      const cleanText = (text) => text ? `"${text.replace(/"/g, '""').replace(/\n/g, ' ')}"` : '""';
-
-      const rowData = [
-        row.id,
-        row.fechaRegistro,
-        cleanText(row.conductor),
-        cleanText(row.vehiculo),
-        row.inicio,
-        row.fin,
-        cleanText(row.destinos),
-        cleanText(row.diligencias),
-        row.kmInicial,
-        row.kmFinal,
-        row.kmRecorridos,
-        row.litrosUsados,
-        row.costoTotal
-      ];
-      csvContent += rowData.join(",") + "\n";
+    // Actualizamos estado radicalmente
+    setJornada({
+        estado: 'cerrado',
+        fechaInicio: null, // Limpiamos para evitar conflictos futuros
+        kmInicialDia: 0,
+        fechaCierre: fechaCierre
     });
 
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", "bitacora_vehicular.csv");
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    // 4. Intento de reporte (en segundo plano para no bloquear UI)
+    setTimeout(() => {
+        try {
+            exportarExcel('jornada_especifica', true, fechaParaReporte);
+        } catch(e) { console.error(e); }
+        alert("✅ Jornada finalizada correctamente.");
+    }, 500);
   };
 
+  const reabrirDia = () => {
+      if(confirm("¿Reabrir la última jornada para agregar correcciones?")) {
+          setJornada(prev => ({ ...prev, estado: 'abierto', fechaCierre: null }));
+      }
+  };
+
+  // --- UTILS EXPORTACIÓN ---
+  const exportarExcel = (modo = 'todo', silencioso = false, fechaEspecifica = null) => {
+    try {
+        let datosExportar = viajes;
+
+        if (modo === 'jornada_especifica' && fechaEspecifica) {
+            const diaJornada = new Date(fechaEspecifica).toDateString();
+            datosExportar = viajes.filter(v => new Date(v.inicio).toDateString() === diaJornada);
+        } else if (modo === 'fecha') {
+            datosExportar = viajes.filter(v => v.inicio.startsWith(filtroFecha));
+        }
+
+        if (datosExportar.length === 0) {
+            if (!silencioso) alert("No se encontraron registros para generar el reporte.");
+            return;
+        }
+
+        let csv = "data:text/csv;charset=utf-8,";
+        csv += "ID,Fecha,Conductor,Vehiculo,Inicio,Fin,Destino,Diligencia,Km Ini,Km Fin,Recorrido(Km),Litros,Costo(C$),Comentarios\n";
+
+        datosExportar.forEach(v => {
+          const clean = (t) => t ? `"${t.toString().replace(/"/g, '""')}"` : '""';
+          csv += `${v.id},${new Date(v.inicio).toLocaleDateString()},${clean(config.conductor)},${clean(config.vehiculo)},` +
+                 `${new Date(v.inicio).toLocaleTimeString()},${v.fin ? new Date(v.fin).toLocaleTimeString() : 'CANCELADO'},` +
+                 `${clean(v.destinos)},${clean(v.diligencias)},${v.kmInicial},${v.kmFinal || 0},${v.kmRecorridos || 0},` +
+                 `${v.litrosUsados || 0},${v.costoTotal || 0},${clean(v.comentarios)}\n`;
+        });
+
+        const link = document.createElement("a");
+        link.href = encodeURI(csv);
+        link.download = `Reporte_${modo}_${new Date().getTime()}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    } catch (error) {
+        console.error("Error exportando excel:", error);
+        if(!silencioso) alert("Error al generar el archivo Excel.");
+    }
+  };
+
+  const obtenerUltimoKm = () => {
+      if (viajes.length > 0) return viajes[0].kmFinal;
+      return jornada.kmInicialDia || 0;
+  };
+
+  const limpiarViajeFantasma = () => {
+      if(confirm("¿Forzar la detención de viajes atascados?")) {
+          setViajeActual(null);
+          localStorage.removeItem('bv_viaje_actual');
+          alert("Listo.");
+      }
+  };
+
+  // --- RENDERIZADO ---
   return (
-    <div className="min-h-screen bg-slate-50 font-sans text-slate-800">
-      {/* Header */}
-      <header className="bg-blue-700 text-white p-4 shadow-md sticky top-0 z-10">
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-800 pb-24">
+      
+      {/* HEADER */}
+      <header className="bg-slate-900 text-white p-4 shadow-lg sticky top-0 z-20">
         <div className="max-w-md mx-auto flex justify-between items-center">
           <div className="flex items-center gap-2">
-            <Car className="h-6 w-6" />
-            <h1 className="text-xl font-bold">Control de Ruta</h1>
+            <div className="bg-blue-600 p-2 rounded-full"><Car size={20} /></div>
+            <div>
+                <h1 className="font-bold text-lg leading-tight">Control de Ruta</h1>
+                <p className="text-xs text-slate-400">{config.conductor || 'Sin Conductor'}</p>
+            </div>
           </div>
-          {config.conductor && <span className="text-xs bg-blue-800 px-2 py-1 rounded truncate max-w-[120px]">{config.conductor}</span>}
+          <div className="text-right">
+             <span className={`text-xs px-2 py-1 rounded-full font-bold ${jornada.estado === 'abierto' ? 'bg-green-500 text-green-900' : 'bg-red-500 text-white'}`}>
+                 {jornada.estado === 'abierto' ? 'Activa' : 'Cerrada'}
+             </span>
+          </div>
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="max-w-md mx-auto p-4 pb-24">
+      <main className="max-w-md mx-auto p-4">
         
-        {/* TAB: REGISTRO */}
-        {activeTab === 'registro' && (
-          <div className="space-y-4 animate-fade-in">
-            <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
-              <h2 className="text-lg font-semibold mb-4 flex items-center gap-2 text-slate-700">
-                <PlusCircle className="h-5 w-5 text-blue-600" /> Nuevo Recorrido
-              </h2>
-              
-              <form onSubmit={registrarViaje} className="space-y-4">
-                
-                {/* Fechas */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-500 mb-1">Inicio (Hora)</label>
-                    <input 
-                      required
-                      type="datetime-local" 
-                      name="inicio"
-                      value={nuevoViaje.inicio}
-                      onChange={handleViajeChange}
-                      className="w-full p-2 border rounded-lg text-sm bg-slate-50 focus:ring-2 focus:ring-blue-500 outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-500 mb-1">Fin (Hora)</label>
-                    <input 
-                      required
-                      type="datetime-local" 
-                      name="fin"
-                      value={nuevoViaje.fin}
-                      onChange={handleViajeChange}
-                      className="w-full p-2 border rounded-lg text-sm bg-slate-50 focus:ring-2 focus:ring-blue-500 outline-none"
-                    />
-                  </div>
-                </div>
+        {/* === TAB: DASHBOARD (Principal) === */}
+        {activeTab === 'dashboard' && (
+          <div className="space-y-6 animate-fade-in">
 
-                {/* Destinos */}
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Destino(s)</label>
-                  <div className="relative">
-                    <MapPin className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                    <input 
-                      required
-                      type="text" 
-                      name="destinos"
-                      placeholder="Ej. Centro, Almacén, Oficina..."
-                      value={nuevoViaje.destinos}
-                      onChange={handleViajeChange}
-                      className="w-full pl-9 p-2 border rounded-lg text-sm bg-slate-50 focus:ring-2 focus:ring-blue-500 outline-none"
-                    />
-                  </div>
+            {/* ALERTA: JORNADA PASADA ABIERTA */}
+            {esJornadaPasadaAbierta() && (
+                <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded shadow-md mb-4">
+                    <div className="flex items-start">
+                        <AlertOctagon className="text-red-500 mr-2" size={24} />
+                        <div>
+                            <h3 className="font-bold text-red-700">¡Cierre Pendiente!</h3>
+                            <p className="text-sm text-red-600 mt-1">
+                                Tienes abierta la jornada del <strong>{new Date(jornada.fechaInicio).toLocaleDateString()}</strong>.
+                            </p>
+                            <button 
+                                onClick={cerrarDia}
+                                className="mt-3 bg-red-600 text-white text-sm font-bold py-2 px-4 rounded w-full"
+                            >
+                                Cerrar Jornada Pendiente Ahora
+                            </button>
+                        </div>
+                    </div>
                 </div>
+            )}
 
-                {/* Diligencias */}
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Diligencias Realizadas</label>
-                  <div className="relative">
-                    <ClipboardList className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                    <textarea 
-                      name="diligencias"
-                      placeholder="Descripción de actividades..."
-                      value={nuevoViaje.diligencias}
-                      onChange={handleViajeChange}
-                      rows="2"
-                      className="w-full pl-9 p-2 border rounded-lg text-sm bg-slate-50 focus:ring-2 focus:ring-blue-500 outline-none resize-none"
-                    />
-                  </div>
+            {/* 1. ESTADO DE JORNADA CERRADA */}
+            {jornada.estado === 'cerrado' && (
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 text-center space-y-4">
+                    <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto text-slate-400">
+                        <Clock size={32} />
+                    </div>
+                    <h2 className="text-xl font-bold text-slate-800">Iniciar Jornada</h2>
+                    <p className="text-sm text-slate-500">Registra tu kilometraje actual para comenzar a operar el día de hoy.</p>
+                    
+                    <form onSubmit={iniciarDia} className="mt-4">
+                        <label className="block text-left text-xs font-bold text-slate-600 mb-1 ml-1">Kilometraje Inicial del Día</label>
+                        <input 
+                            type="number" step="0.1" required
+                            placeholder="Ej. 120500"
+                            className="w-full text-2xl font-bold text-center p-3 border-2 border-slate-200 rounded-xl focus:border-blue-500 outline-none mb-4"
+                            value={formInicioDia.km}
+                            onChange={e => setFormInicioDia({km: e.target.value})}
+                        />
+                        <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl shadow-lg flex justify-center items-center gap-2">
+                            <PlayCircle /> Iniciar Día
+                        </button>
+                    </form>
+                    
+                    {jornada.fechaCierre && (
+                        <button onClick={reabrirDia} className="text-xs text-blue-500 underline mt-2">
+                            Reabrir última jornada cerrada
+                        </button>
+                    )}
                 </div>
+            )}
 
-                {/* Kilometraje */}
-                <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-600 mb-1">Km Inicial</label>
-                    <input 
-                      required
-                      type="number" 
-                      step="0.1"
-                      name="kmInicial"
-                      placeholder="0000"
-                      value={nuevoViaje.kmInicial}
-                      onChange={handleViajeChange}
-                      className="w-full p-2 border border-slate-300 rounded-md text-sm focus:border-blue-500 outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-600 mb-1">Km Final</label>
-                    <input 
-                      required
-                      type="number" 
-                      step="0.1"
-                      name="kmFinal"
-                      placeholder="0000"
-                      value={nuevoViaje.kmFinal}
-                      onChange={handleViajeChange}
-                      className="w-full p-2 border border-slate-300 rounded-md text-sm focus:border-blue-500 outline-none"
-                    />
-                  </div>
-                </div>
+            {/* 2. JORNADA ABIERTA */}
+            {jornada.estado === 'abierto' && !esJornadaPasadaAbierta() && (
+                <>
+                    {/* Info Jornada */}
+                    <div className="flex justify-between items-center bg-blue-50 p-3 rounded-lg border border-blue-100 text-sm">
+                        <div>
+                            <span className="text-blue-800 font-bold block">Inicio: {jornada.fechaInicio ? new Date(jornada.fechaInicio).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '--:--'}</span>
+                            <span className="text-blue-600 text-xs">Km Inicial: {jornada.kmInicialDia}</span>
+                        </div>
+                        
+                        <button 
+                            onClick={cerrarDia} 
+                            className={`px-3 py-1 rounded-md text-xs font-bold shadow-sm border transition-colors ${
+                                viajeActual 
+                                ? 'bg-slate-100 border-slate-300 text-slate-500' 
+                                : 'bg-white border-red-200 text-red-600'
+                            }`}
+                        >
+                            {viajeActual ? '⚠ Viaje en curso' : 'Finalizar Día'}
+                        </button>
+                    </div>
 
-                {/* Info de Configuración Actual */}
-                <div className="text-xs text-slate-400 text-center flex justify-center gap-4">
-                  <span>🚗 {config.vehiculo || 'Sin vehículo'}</span>
-                  <span>⛽ C$ {config.precioPorLitro}/L</span>
-                </div>
+                    {/* 2A. FORMULARIO INICIO VIAJE */}
+                    {!viajeActual && (
+                        <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+                            <h2 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+                                <MapPin className="text-green-600" /> Nuevo Recorrido
+                            </h2>
+                            <form onSubmit={iniciarRecorrido} className="space-y-4">
+                                <div>
+                                    <label className="label-input">Destino Principal</label>
+                                    <input 
+                                        type="text" required
+                                        placeholder="Ej. Oficinas Centrales"
+                                        className="input-field"
+                                        value={formInicioViaje.destino}
+                                        onChange={e => setFormInicioViaje({...formInicioViaje, destino: e.target.value})}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="label-input">Diligencias / Actividad</label>
+                                    <textarea 
+                                        rows="2" required
+                                        placeholder="Entrega de documentos..."
+                                        className="input-field resize-none"
+                                        value={formInicioViaje.diligencias}
+                                        onChange={e => setFormInicioViaje({...formInicioViaje, diligencias: e.target.value})}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="label-input flex justify-between">
+                                        <span>Km Salida</span>
+                                        <span className="text-blue-500 font-normal cursor-pointer" onClick={() => setFormInicioViaje(p => ({...p, kmInicial: obtenerUltimoKm()}))}>
+                                            Sugerido: {obtenerUltimoKm()}
+                                        </span>
+                                    </label>
+                                    <input 
+                                        type="number" step="0.1" required
+                                        className="input-field font-bold text-lg"
+                                        value={formInicioViaje.kmInicial}
+                                        onFocus={(e) => !e.target.value && setFormInicioViaje({...formInicioViaje, kmInicial: obtenerUltimoKm()})}
+                                        onChange={e => setFormInicioViaje({...formInicioViaje, kmInicial: e.target.value})}
+                                    />
+                                </div>
+                                <button className="btn-primary bg-green-600 hover:bg-green-700">
+                                    <PlayCircle size={20} /> Comenzar Viaje
+                                </button>
+                            </form>
+                        </div>
+                    )}
 
-                <button 
-                  type="submit"
-                  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow-lg transform active:scale-95 transition-all flex justify-center items-center gap-2"
-                >
-                  <Save className="h-5 w-5" /> Registrar Viaje
-                </button>
-              </form>
+                    {/* 2B. FORMULARIO FIN VIAJE */}
+                    {viajeActual && (
+                        <div className="bg-white p-1 rounded-2xl shadow-lg border-2 border-blue-500 overflow-hidden">
+                            <div className="bg-blue-50 p-4 border-b border-blue-100">
+                                <div className="flex justify-between items-start">
+                                    <div>
+                                        <span className="text-xs font-bold text-blue-600 uppercase tracking-wider">En Curso</span>
+                                        <h3 className="text-xl font-bold text-slate-800">{viajeActual.destinos}</h3>
+                                    </div>
+                                    <div className="bg-blue-600 text-white px-2 py-1 rounded text-xs font-mono">
+                                        {new Date(viajeActual.inicio).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                    </div>
+                                </div>
+                                <p className="text-sm text-slate-600 mt-1">{viajeActual.diligencias}</p>
+                                <p className="text-xs text-slate-500 mt-2">Salida: <strong>{viajeActual.kmInicial} km</strong></p>
+                            </div>
+
+                            <div className="p-5">
+                                <form onSubmit={finalizarRecorrido} className="space-y-4">
+                                    <div>
+                                        <label className="label-input">Kilometraje de Llegada</label>
+                                        <input 
+                                            type="number" step="0.1" required
+                                            autoFocus
+                                            placeholder={viajeActual.kmInicial + 5}
+                                            className="input-field text-2xl font-bold text-center border-blue-200 focus:border-blue-600"
+                                            value={formFinViaje.kmFinal}
+                                            onChange={e => setFormFinViaje({...formFinViaje, kmFinal: e.target.value})}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="label-input">Comentarios / Incidencias</label>
+                                        <textarea 
+                                            rows="2"
+                                            placeholder="Sin novedades..."
+                                            className="input-field"
+                                            value={formFinViaje.comentarios}
+                                            onChange={e => setFormFinViaje({...formFinViaje, comentarios: e.target.value})}
+                                        />
+                                    </div>
+                                    <button className="btn-primary bg-red-600 hover:bg-red-700">
+                                        <StopCircle size={20} /> Finalizar Viaje
+                                    </button>
+                                    
+                                    <button 
+                                        type="button"
+                                        onClick={cancelarViajeActual}
+                                        className="w-full text-slate-400 text-xs py-2 flex items-center justify-center gap-1 hover:text-red-500"
+                                    >
+                                        <XCircle size={14} /> Cancelar viaje (Orden cambiada)
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    )}
+                </>
+            )}
+            
+            {/* RESUMEN RÁPIDO */}
+            <div className="mt-4">
+                <h3 className="text-xs font-bold text-slate-400 uppercase mb-2 ml-1">Historial Reciente</h3>
+                {viajes.slice(0,3).map(v => (
+                    <div key={v.id} className="bg-white p-3 rounded-lg border border-slate-100 mb-2 flex justify-between items-center opacity-75">
+                        <div>
+                            <p className="font-bold text-sm">{v.destinos}</p>
+                            <p className="text-xs text-slate-500">{new Date(v.inicio).toLocaleDateString()}</p>
+                        </div>
+                        <span className="text-xs font-bold text-green-600">C$ {v.costoTotal || 0}</span>
+                    </div>
+                ))}
             </div>
+
           </div>
         )}
 
-        {/* TAB: HISTORIAL */}
+        {/* === TAB: HISTORIAL === */}
         {activeTab === 'historial' && (
           <div className="space-y-4 animate-fade-in">
-             <div className="flex justify-between items-center mb-2">
-                <h2 className="text-lg font-semibold text-slate-700">Historial de Viajes</h2>
-                <button 
-                  onClick={exportarExcel}
-                  className="text-xs bg-green-600 text-white px-3 py-1.5 rounded-lg flex items-center gap-1 hover:bg-green-700 shadow-sm"
-                >
-                  <FileSpreadsheet className="h-4 w-4" /> Exportar Excel
-                </button>
+             <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 sticky top-16 z-10">
+                <h2 className="text-lg font-bold text-slate-700 mb-3">Reportes</h2>
+                <div className="flex gap-2 mb-3">
+                    <input 
+                        type="date" 
+                        value={filtroFecha}
+                        onChange={(e) => setFiltroFecha(e.target.value)}
+                        className="border p-2 rounded-lg text-sm flex-1"
+                    />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                    <button onClick={() => exportarExcel('fecha')} className="btn-secondary text-xs">
+                        <FileSpreadsheet size={16} /> Exportar Día Seleccionado
+                    </button>
+                    <button onClick={() => exportarExcel('todo')} className="btn-secondary text-xs">
+                        <FileSpreadsheet size={16} /> Exportar Todo
+                    </button>
+                </div>
              </div>
 
-             {viajes.length === 0 ? (
-               <div className="text-center py-10 text-slate-400">
-                 <p>No hay viajes registrados aún.</p>
-               </div>
-             ) : (
-               viajes.map((v) => (
-                 <div key={v.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 relative overflow-hidden">
-                    <div className="absolute top-0 left-0 w-1 h-full bg-blue-500"></div>
-                    
-                    <div className="flex justify-between items-start mb-2">
-                      <div className="flex-1 mr-2">
-                        <h3 className="font-bold text-slate-800 text-lg">{v.destinos}</h3>
-                        <p className="text-xs text-slate-500 mb-1">{new Date(v.inicio).toLocaleString()} - {new Date(v.fin).toLocaleTimeString()}</p>
-                        {v.diligencias && (
-                          <div className="text-sm text-slate-600 italic bg-slate-50 p-2 rounded mt-1 border border-slate-100">
-                            "{v.diligencias}"
-                          </div>
+             <div className="space-y-3">
+                {viajes.length === 0 ? <p className="text-center text-slate-400 py-10">Sin historial</p> : 
+                 viajes.map((v) => (
+                    <div key={v.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+                        <div className="flex justify-between items-start mb-2">
+                            <div>
+                                <h3 className="font-bold text-slate-800">{v.destinos}</h3>
+                                <div className="flex items-center gap-2 text-xs text-slate-500 mt-1">
+                                    <Calendar size={12} /> {new Date(v.inicio).toLocaleDateString()}
+                                    <Clock size={12} /> {new Date(v.inicio).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})} - {v.fin ? new Date(v.fin).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '...'}
+                                </div>
+                            </div>
+                            <button 
+                                onClick={() => {
+                                    if(confirm("¿Eliminar este registro del historial?")) {
+                                        setViajes(viajes.filter(x => x.id !== v.id));
+                                    }
+                                }}
+                                className="text-slate-300 hover:text-red-500"
+                            >
+                                <Trash2 size={16} />
+                            </button>
+                        </div>
+                        
+                        {v.comentarios && (
+                            <div className="bg-yellow-50 text-yellow-800 text-xs p-2 rounded mb-3 border border-yellow-100">
+                                💬 {v.comentarios}
+                            </div>
                         )}
-                      </div>
-                      <button onClick={() => borrarViaje(v.id)} className="text-red-400 hover:text-red-600 p-1">
-                        <Trash2 className="h-5 w-5" />
-                      </button>
-                    </div>
 
-                    <div className="grid grid-cols-3 gap-2 text-center mt-3 bg-slate-50 p-2 rounded-lg text-sm">
-                      <div>
-                        <p className="text-xs text-slate-400 uppercase">Distancia</p>
-                        <p className="font-semibold text-blue-700">{v.kmRecorridos} km</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-slate-400 uppercase">Combustible</p>
-                        <p className="font-semibold text-orange-600">{v.litrosUsados} L</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-slate-400 uppercase">Costo</p>
-                        <p className="font-bold text-green-700">C$ {v.costoTotal}</p>
-                      </div>
+                        <div className="grid grid-cols-3 gap-1 bg-slate-50 p-2 rounded-lg text-center text-xs">
+                            <div>
+                                <span className="block text-slate-400">Distancia</span>
+                                <span className="font-bold text-blue-600">{v.kmRecorridos} km</span>
+                            </div>
+                            <div>
+                                <span className="block text-slate-400">Gasolina</span>
+                                <span className="font-bold text-orange-600">{v.litrosUsados} L</span>
+                            </div>
+                            <div>
+                                <span className="block text-slate-400">Costo</span>
+                                <span className="font-bold text-green-600">C$ {v.costoTotal}</span>
+                            </div>
+                        </div>
                     </div>
-                 </div>
-               ))
-             )}
+                 ))
+                }
+             </div>
           </div>
         )}
 
-        {/* TAB: CONFIGURACION */}
+        {/* === TAB: CONFIGURACIÓN === */}
         {activeTab === 'config' && (
-          <div className="space-y-4 animate-fade-in">
-            <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
-              <h2 className="text-lg font-semibold mb-4 flex items-center gap-2 text-slate-700">
-                <Settings className="h-5 w-5 text-slate-500" /> Parámetros Iniciales
-              </h2>
-              
-              <div className="space-y-4">
-                <div className="bg-yellow-50 border border-yellow-200 p-3 rounded-lg text-sm text-yellow-800 mb-4">
-                  Configura estos datos una sola vez. Se guardarán automáticamente.
+          <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 animate-fade-in">
+             <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
+                <Settings className="text-slate-400" /> Ajustes
+             </h2>
+
+             <div className="space-y-4">
+                <div className="flex justify-center gap-6 mb-6">
+                    <div className="text-center">
+                        <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-2 border-2 border-dashed border-slate-300 text-slate-400">
+                            <Car size={32} />
+                        </div>
+                        <p className="text-xs font-bold text-slate-500">Foto Vehículo</p>
+                    </div>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-slate-600 mb-1">Nombre del Conductor</label>
-                  <input 
-                    type="text" 
-                    name="conductor"
-                    value={config.conductor}
-                    onChange={handleConfigChange}
-                    className="w-full p-2 border rounded-lg bg-slate-50 focus:ring-2 focus:ring-blue-500 outline-none"
-                  />
+                    <label className="label-input">Conductor</label>
+                    <input type="text" className="input-field" value={config.conductor} onChange={e => setConfig({...config, conductor: e.target.value})} />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-600 mb-1">Descripción del Vehículo</label>
-                  <input 
-                    type="text" 
-                    name="vehiculo"
-                    placeholder="Ej. Nissan Versa 2020 - Placa ABC-123"
-                    value={config.vehiculo}
-                    onChange={handleConfigChange}
-                    className="w-full p-2 border rounded-lg bg-slate-50 focus:ring-2 focus:ring-blue-500 outline-none"
-                  />
+                    <label className="label-input">Vehículo</label>
+                    <input type="text" className="input-field" value={config.vehiculo} onChange={e => setConfig({...config, vehiculo: e.target.value})} />
                 </div>
-
-                <div className="grid grid-cols-2 gap-4 pt-2">
-                  <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
-                    <label className="block text-xs font-bold text-blue-800 mb-1 flex items-center gap-1">
-                      <TrendingUp className="h-3 w-3" /> Rendimiento (Km/L)
-                    </label>
-                    <input 
-                      type="number" 
-                      name="kmPorLitro"
-                      value={config.kmPorLitro}
-                      onChange={handleConfigChange}
-                      className="w-full p-2 border border-blue-200 rounded-md text-center font-bold"
-                    />
-                  </div>
-                  <div className="bg-green-50 p-3 rounded-lg border border-green-100">
-                    <label className="block text-xs font-bold text-green-800 mb-1 flex items-center gap-1">
-                      <DollarSign className="h-3 w-3" /> Precio Gasolina (C$/L)
-                    </label>
-                    <input 
-                      type="number" 
-                      name="precioPorLitro"
-                      value={config.precioPorLitro}
-                      onChange={handleConfigChange}
-                      className="w-full p-2 border border-green-200 rounded-md text-center font-bold"
-                    />
-                  </div>
+                <div className="grid grid-cols-2 gap-4">
+                    <div>
+                        <label className="label-input">Rendimiento (Km/L)</label>
+                        <input type="number" className="input-field text-center font-bold" value={config.kmPorLitro} onChange={e => setConfig({...config, kmPorLitro: e.target.value})} />
+                    </div>
+                    <div>
+                        <label className="label-input">Precio (C$/L)</label>
+                        <input type="number" className="input-field text-center font-bold" value={config.precioPorLitro} onChange={e => setConfig({...config, precioPorLitro: e.target.value})} />
+                    </div>
                 </div>
+             </div>
+             
+             <div className="mt-8 pt-8 border-t border-slate-100 space-y-3">
+                <button 
+                    onClick={limpiarViajeFantasma}
+                    className="w-full bg-blue-50 text-blue-600 text-sm font-bold py-3 hover:bg-blue-100 rounded-lg flex items-center justify-center gap-2"
+                >
+                    <ShieldCheck size={16} /> Corregir error 'Viaje en curso'
+                </button>
 
-                {config.conductor && config.vehiculo && (
-                  <button 
-                    onClick={() => setActiveTab('registro')}
-                    className="w-full mt-4 bg-slate-800 text-white py-2 rounded-lg hover:bg-slate-900 transition-colors"
-                  >
-                    Guardar y Continuar
-                  </button>
-                )}
-
-                <hr className="my-6 border-slate-200" />
-                
-                {/* ZONA DE PELIGRO */}
-                <div className="pt-2">
-                   <h3 className="text-sm font-bold text-red-600 mb-2 flex items-center gap-1">
-                     <AlertTriangle className="h-4 w-4" /> Zona de Peligro
-                   </h3>
-                   <button 
-                     onClick={reiniciarApp}
-                     className="w-full bg-red-50 text-red-600 border border-red-200 py-3 rounded-lg hover:bg-red-100 transition-colors flex justify-center items-center gap-2 font-semibold"
-                   >
-                     <Trash2 className="h-5 w-5" /> Borrar Todo y Reiniciar
-                   </button>
-                </div>
-              </div>
-            </div>
+                <button 
+                    onClick={() => {
+                        if(confirm("⚠️ ¿ESTÁS SEGURO? Se borrarán todos los datos y el historial permanentemente.")) {
+                            localStorage.clear();
+                            window.location.reload();
+                        }
+                    }}
+                    className="w-full text-red-500 text-sm font-bold py-3 hover:bg-red-50 rounded-lg flex items-center justify-center gap-2"
+                >
+                    <AlertTriangle size={16} /> Reiniciar Fábrica
+                </button>
+             </div>
           </div>
         )}
+
       </main>
-      
-      {/* Navigation Bar (Bottom) */}
-      <nav className="fixed bottom-0 w-full bg-white border-t border-slate-200 shadow-lg z-20">
+
+      {/* NAVBAR */}
+      <nav className="fixed bottom-0 w-full bg-white border-t border-slate-200 shadow-2xl z-20 pb-safe">
         <div className="max-w-md mx-auto grid grid-cols-3 h-16">
-          <button onClick={() => setActiveTab('registro')} className={`flex flex-col items-center justify-center space-y-1 ${activeTab === 'registro' ? 'text-blue-600 font-bold' : 'text-slate-400 hover:text-slate-600'}`}>
-            <PlusCircle className="h-6 w-6" /> <span className="text-xs">Registro</span>
+          <button onClick={() => setActiveTab('dashboard')} className={`nav-btn ${activeTab === 'dashboard' ? 'active' : ''}`}>
+            <CheckCircle size={24} /> <span className="text-[10px] mt-1">Jornada</span>
           </button>
-          <button onClick={() => setActiveTab('historial')} className={`flex flex-col items-center justify-center space-y-1 ${activeTab === 'historial' ? 'text-blue-600 font-bold' : 'text-slate-400 hover:text-slate-600'}`}>
-            <History className="h-6 w-6" /> <span className="text-xs">Historial</span>
+          <button onClick={() => setActiveTab('historial')} className={`nav-btn ${activeTab === 'historial' ? 'active' : ''}`}>
+            <History size={24} /> <span className="text-[10px] mt-1">Historial</span>
           </button>
-          <button onClick={() => setActiveTab('config')} className={`flex flex-col items-center justify-center space-y-1 ${activeTab === 'config' ? 'text-blue-600 font-bold' : 'text-slate-400 hover:text-slate-600'}`}>
-            <Settings className="h-6 w-6" /> <span className="text-xs">Ajustes</span>
+          <button onClick={() => setActiveTab('config')} className={`nav-btn ${activeTab === 'config' ? 'active' : ''}`}>
+            <Settings size={24} /> <span className="text-[10px] mt-1">Ajustes</span>
           </button>
         </div>
       </nav>
+
+      <style>{`
+        .input-field { width: 100%; padding: 10px; border: 1px solid #e2e8f0; border-radius: 8px; outline: none; transition: all 0.2s; }
+        .input-field:focus { border-color: #3b82f6; ring: 2px; }
+        .label-input { display: block; font-size: 12px; font-weight: 600; color: #64748b; margin-bottom: 4px; }
+        .btn-primary { width: 100%; color: white; font-weight: bold; padding: 12px; border-radius: 12px; display: flex; justify-content: center; align-items: center; gap: 8px; shadow: lg; transition: transform 0.1s; }
+        .btn-primary:active { transform: scale(0.98); }
+        .btn-secondary { background: white; border: 1px solid #e2e8f0; color: #475569; padding: 8px; border-radius: 8px; display: flex; justify-content: center; align-items: center; gap: 6px; font-weight: 500; }
+        .nav-btn { display: flex; flex-direction: column; align-items: center; justify-content: center; color: #94a3b8; }
+        .nav-btn.active { color: #2563eb; }
+        .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+      `}</style>
     </div>
   );
 }
